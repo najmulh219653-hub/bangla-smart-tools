@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// জেমিনি এআই ইনিশিয়ালাইজ (API Key রেন্ডারের Environment Variable থেকে আসবে)
+// জেমিনি এআই ইনিশিয়ালাইজ (রেন্ডারের Environment Variable থেকে API Key আসবে)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ১. হেলথ চেক রাউট (Uptime Robot-এর জন্য)
