@@ -1,7 +1,7 @@
 {
   "name": "bangla-smart-tools",
-  "version": "5.0.0",
-  "description": "Bangla Smart Tools AI Telegram Bot",
+  "version": "6.0.0",
+  "description": "Professional Bangla Smart Tools AI Telegram Bot",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -13,6 +13,7 @@
   "dependencies": {
     "@google/genai": "^3.6.0",
     "express": "^5.1.0",
+    "google-tts-api": "^2.0.2",
     "mathjs": "^14.8.1",
     "node-telegram-bot-api": "^0.66.0"
   }
