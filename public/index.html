@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bangla Smart Tools</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #090d16 0%, #171e36 50%, #1e1b4b 100%);
+            --glass-bg: rgba(255, 255, 255, 0.06);
+            --glass-border: rgba(255, 255, 255, 0.12);
+            --primary: #6366f1;
+            --primary-glow: 0 0 20px rgba(99, 102, 241, 0.6);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background: var(--bg-gradient);
+            background-attachment: fixed;
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 440px;
+        }
+
+        /* হেডার ডিজাইন */
+        .header {
+            text-align: center;
+            padding: 15px 0 25px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(to right, #818cf8, #c084fc, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 6px;
+        }
+
+        .header p {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        /* ড্যাশবোর্ড গ্রিড ও বাটন */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+        }
+
+        .card-btn {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 18px;
+            padding: 20px 14px;
+            color: var(--text-main);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            cursor: pointer;
+            transition: all 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        }
+
+        .card-btn:active, .card-btn:hover {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(168, 85, 247, 0.25));
+            border-color: #818cf8;
+            box-shadow: var(--primary-glow);
+            transform: translateY(-2px);
+        }
+
+        .card-icon {
+            font-size: 30px;
+            background: rgba(255, 255, 255, 0.08);
+            width: 54px;
+            height: 54px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .card-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* টুল ওয়ার্কস্পেস (ভেতরের পেজ) */
+        .workspace {
+            display: none;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 18px;
+            backdrop-filter: blur(16px);
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .ws-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .back-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        select, textarea, input {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 12px;
+            color: white;
+            font-size: 14px;
+            margin-bottom: 12px;
+            outline: none;
+        }
+
+        select:focus, textarea:focus, input:focus {
+            border-color: var(--primary);
+        }
+
+        .action-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            border: none;
+            border-radius: 12px;
+            padding: 13px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: var(--primary-glow);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .voice-btn {
+            background: linear-gradient(135deg, #ec4899, #8b5cf6);
+            margin-bottom: 10px;
+        }
+
+        .result-box {
+            margin-top: 16px;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            display: none;
+        }
+
+        /* ক্যালকুলেটর গ্রিড */
+        .calc-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+
+        .calc-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--glass-border);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .calc-btn.op { background: rgba(99, 102, 241, 0.3); }
+        .calc-btn.eq { background: #10b981; grid-column: span 2; }
+
+        .footer {
+            margin-top: 28px;
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            padding-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>✨ Bangla Smart Tools</h1>
+        <p>আপনার অল-ইন-ওয়ান এআই ও স্মার্ট অ্যাসিস্ট্যান্ট</p>
+    </div>
+
+    <!-- মেইন ড্যাশবোর্ড -->
+    <div id="dashboard" class="grid">
+        <div class="card-btn" onclick="openTool('chat', '💬 এআই চ্যাট')">
+            <div class="card-icon">💬</div>
+            <div class="card-title">এআই চ্যাট</div>
+            <div class="card-desc">যেকোনো প্রশ্নের স্মার্ট উত্তর</div>
+        </div>
+
+        <div class="card-btn" onclick="openTool('translate', '🌍 ভাষা অনুবাদ')">
+            <div class="card-icon">🌍</div>
+            <div class="card-title">ভাষা অনুবাদ</div>
+            <div class="card-desc">যেকোনো ভাষায় দ্রুত অনুবাদ</div>
+        </div>
+
+        <div class="card-btn" onclick="openTool('language', '🗣️ ভাষা শিক্ষা')">
+            <div class="card-icon">🗣️</div>
+            <div class="card-title">সব ভাষা শিক্ষা</div>
+            <div class="card-desc">যেকোনো ভাষা সহজেই শিখুন</div>
+        </div>
+
+        <div class="card-btn" onclick="openTool('voice', '🎙️ ভয়েস অ্যাসিস্ট্যান্ট')">
+            <div class="card-icon">🎙️</div>
+            <div class="card-title">ভয়েস এআই</div>
+            <div class="card-desc">কথা বলে প্রশ্ন করুন</div>
+        </div>
+
+        <div class="card-btn" onclick="openTool('content', '🎬 কন্টেন্ট স্টুডিও')">
+            <div class="card-icon">🎬</div>
+            <div class="card-title">কন্টেন্ট স্টুডিও</div>
+            <div class="card-desc">ক্যাপশন ও ভিডিও আইডিয়া</div>
+        </div>
+
+        <div class="card-btn" onclick="openTool('image_prompt', '🎨 এআই ইমেজ')">
+            <div class="card-icon">🎨</div>
+            <div class="card-title">এআই ইমেজ স্টুডিও</div>
+            <div class="card-desc">ছবির আইডিয়া ও প্রম্পট</div>
+        </div>
+
+        <div class="card-btn" style="grid-column: span 2;" onclick="openCalculator()">
+            <div class="card-icon">🧮</div>
+            <div class="card-title">স্মার্ট ক্যালকুলেটর</div>
+            <div class="card-desc">দ্রুত ও নির্ভুল হিসাব-নিকাশ</div>
+        </div>
+    </div>
+
+    <!-- এআই ওয়ার্কস্পেস -->
+    <div id="aiWorkspace" class="workspace">
+        <div class="ws-header">
+            <h3 id="wsTitle" style="font-size: 17px;">টুল</h3>
+            <button class="back-btn" onclick="goHome()">← ফিরে যান</button>
+        </div>
+
+        <!-- অতিরিক্ত অপশন (ভাষা বা প্ল্যাটফর্ম সিলেক্টর) -->
+        <select id="extraSelect" style="display: none;"></select>
+
+        <!-- ভয়েস ইনপুট বাটন -->
+        <button id="voiceInputBtn" class="action-btn voice-btn" style="display: none;" onclick="startVoiceRecognition()">
+            🎙️ কথা বলুন (ভয়েস ইনপুট)
+        </button>
+
+        <textarea id="userInput" rows="4" placeholder="এখানে আপনার লেখা বা প্রশ্ন লিখুন..."></textarea>
+        
+        <button class="action-btn" id="submitBtn" onclick="sendRequest()">✨ উত্তর তৈরি করুন</button>
+
+        <div id="resultBox" class="result-box"></div>
+    </div>
+
+    <!-- ক্যালকুলেটর ওয়ার্কস্পেস -->
+    <div id="calcWorkspace" class="workspace">
+        <div class="ws-header">
+            <h3 style="font-size: 17px;">🧮 স্মার্ট ক্যালকুলেটর</h3>
+            <button class="back-btn" onclick="goHome()">← ফিরে যান</button>
+        </div>
+        <input type="text" id="calcDisplay" readonly placeholder="0" style="text-align: right; font-size: 22px; font-weight: bold;">
+        <div class="calc-grid">
+            <button class="calc-btn op" onclick="clearCalc()">C</button>
+            <button class="calc-btn op" onclick="appendCalc('/')">÷</button>
+            <button class="calc-btn op" onclick="appendCalc('*')">×</button>
+            <button class="calc-btn op" onclick="backspaceCalc()">⌫</button>
+            <button class="calc-btn" onclick="appendCalc('7')">7</button>
+            <button class="calc-btn" onclick="appendCalc('8')">8</button>
+            <button class="calc-btn" onclick="appendCalc('9')">9</button>
+            <button class="calc-btn op" onclick="appendCalc('-')">-</button>
+            <button class="calc-btn" onclick="appendCalc('4')">4</button>
+            <button class="calc-btn" onclick="appendCalc('5')">5</button>
+            <button class="calc-btn" onclick="appendCalc('6')">6</button>
+            <button class="calc-btn op" onclick="appendCalc('+')">+</button>
+            <button class="calc-btn" onclick="appendCalc('1')">1</button>
+            <button class="calc-btn" onclick="appendCalc('2')">2</button>
+            <button class="calc-btn" onclick="appendCalc('3')">3</button>
+            <button class="calc-btn" onclick="appendCalc('.')">.</button>
+            <button class="calc-btn" onclick="appendCalc('0')">0</button>
+            <button class="calc-btn eq" onclick="calculateResult()">=</button>
+        </div>
+    </div>
+
+    <div class="footer">
+        Founder: Najmul Hoque Forhad 🇧🇩
+    </div>
+</div>
+
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+
+    let currentTool = '';
+
+    function openTool(tool, title) {
+        currentTool = tool;
+        document.getElementById('dashboard').style.display = 'none';
+        document.getElementById('calcWorkspace').style.display = 'none';
+        document.getElementById('aiWorkspace').style.display = 'block';
+        document.getElementById('wsTitle').innerText = title;
+        document.getElementById('userInput').value = '';
+        document.getElementById('resultBox').style.display = 'none';
+
+        const extraSelect = document.getElementById('extraSelect');
+        const voiceBtn = document.getElementById('voiceInputBtn');
+        extraSelect.style.display = 'none';
+        voiceBtn.style.display = (tool === 'voice') ? 'flex' : 'none';
+
+        if (tool === 'translate' || tool === 'language') {
+            extraSelect.style.display = 'block';
+            extraSelect.innerHTML = `
+                <option value="English (ইংরেজি)">English (ইংরেজি)</option>
+                <option value="Arabic (আরবি)">Arabic (আরবি)</option>
+                <option value="Hindi (হিন্দি)">Hindi (হিন্দি)</option>
+                <option value="Spanish (স্প্যানিশ)">Spanish (স্প্যানিশ)</option>
+                <option value="French (ফ্রেঞ্চ)">French (ফ্রেঞ্চ)</option>
+                <option value="Japanese (জাপানি)">Japanese (জাপানি)</option>
+                <option value="Korean (কোরিয়ান)">Korean (কোরিয়ান)</option>
+                <option value="Bengali (বাংলা)">Bengali (বাংলা)</option>
+            `;
+        } else if (tool === 'content') {
+            extraSelect.style.display = 'block';
+            extraSelect.innerHTML = `
+                <option value="Facebook Post">Facebook Post</option>
+                <option value="TikTok Caption">TikTok Caption</option>
+                <option value="YouTube Video">YouTube Video Title & Desc</option>
+                <option value="Instagram Caption">Instagram Caption</option>
+            `;
+        }
+    }
+
+    function openCalculator() {
+        document.getElementById('dashboard').style.display = 'none';
+        document.getElementById('aiWorkspace').style.display = 'none';
+        document.getElementById('calcWorkspace').style.display = 'block';
+    }
+
+    function goHome() {
+        document.getElementById('aiWorkspace').style.display = 'none';
+        document.getElementById('calcWorkspace').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'grid';
+    }
+
+    // ভয়েস রিকগনিশন (কথা বলে টাইপ করা)
+    function startVoiceRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert("দুঃখিত, আপনার ডিভাইসে ভয়েস ইনপুট সাপোর্ট করছে না।");
+            return;
+        }
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'bn-BD';
+        recognition.start();
+
+        const btn = document.getElementById('voiceInputBtn');
+        btn.innerText = "🎙️ শুনছি... কথা বলুন";
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            document.getElementById('userInput').value = transcript;
+            btn.innerText = "🎙️ কথা বলুন (ভয়েস ইনপুট)";
+        };
+
+        recognition.onerror = () => {
+            btn.innerText = "🎙️ আবার চেষ্টা করুন";
+        };
+    }
+
+    // এআই-এর কাছে রিকোয়েস্ট পাঠানো
+    async function sendRequest() {
+        const prompt = document.getElementById('userInput').value.trim();
+        if (!prompt) {
+            alert("অনুগ্রহ করে কিছু লিখুন!");
+            return;
+        }
+
+        const extra = document.getElementById('extraSelect').value;
+        const submitBtn = document.getElementById('submitBtn');
+        const resultBox = document.getElementById('resultBox');
+
+        submitBtn.innerText = "⏳ অপেক্ষা করুন...";
+        submitBtn.disabled = true;
+        resultBox.style.display = 'none';
+
+        try {
+            const response = await fetch('/api/ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool: currentTool === 'voice' ? 'chat' : currentTool,
+                    prompt: prompt,
+                    extra: extra
+                })
+            });
+
+            const data = await response.json();
+            resultBox.innerText = data.reply || data.error;
+            resultBox.style.display = 'block';
+        } catch (err) {
+            resultBox.innerText = "সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। আবার চেষ্টা করুন।";
+            resultBox.style.display = 'block';
+        } finally {
+            submitBtn.innerText = "✨ উত্তর তৈরি করুন";
+            submitBtn.disabled = false;
+        }
+    }
+
+    // ক্যালকুলেটর লজিক
+    function appendCalc(val) {
+        document.getElementById('calcDisplay').value += val;
+    }
+    function clearCalc() {
+        document.getElementById('calcDisplay').value = '';
+    }
+    function backspaceCalc() {
+        let cur = document.getElementById('calcDisplay').value;
+        document.getElementById('calcDisplay').value = cur.slice(0, -1);
+    }
+    function calculateResult() {
+        try {
+            let res = eval(document.getElementById('calcDisplay').value);
+            document.getElementById('calcDisplay').value = res;
+        } catch {
+            document.getElementById('calcDisplay').value = 'Error';
+        }
+    }
+</script>
+
+</body>
+      </html>
