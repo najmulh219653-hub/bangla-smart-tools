@@ -1,0 +1,17 @@
+{
+  "name": "bangla-smart-tools",
+  "version": "1.0.0",
+  "description": "Bangla Smart Tools Telegram Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "mathjs": "^14.8.1"
+  }
+}
