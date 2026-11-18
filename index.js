@@ -1,995 +1,1356 @@
-import TelegramBot from "node-telegram-bot-api";
 import express from "express";
+import TelegramBot from "node-telegram-bot-api";
 import { GoogleGenAI } from "@google/genai";
-import { create, all } from "mathjs";
+import { evaluate } from "mathjs";
 import { getAudioUrl } from "google-tts-api";
-import { randomUUID } from "node:crypto";
 
-const app = express();
-const math = create(all);
+// ==========================================
+// 1. CONFIGURATION
+// ==========================================
 
-const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = process.env.GEMINI_MODEL || "gemini-4-hydrogen";
+
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const PORT = Number(process.env.PORT || 3000);
+const ENABLE_GOOGLE_SEARCH =
+  process.env.ENABLE_GOOGLE_SEARCH === "true";
 
 if (!BOT_TOKEN) {
-  console.error("BOT_TOKEN missing. Add it in Render Environment Variables.");
+  console.error("ERROR: BOT_TOKEN is missing.");
   process.exit(1);
 }
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-const ai = GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
-  : null;
+if (!GEMINI_API_KEY) {
+  console.error("ERROR: GEMINI_API_KEY is missing.");
+  process.exit(1);
+}
 
-app.get("/", (_req, res) => {
-  res.send("🌟 Bangla Smart Tools is running.");
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const app = express();
+
+app.disable("x-powered-by");
+app.use(express.json({ limit: "1mb" }));
+
+// ==========================================
+// 2. SERVER / HEALTH CHECK
+// ==========================================
+
+app.get("/", (req, res) => {
+  res.status(200).send(`
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Bangla Smart Tools</title>
+        <style>
+          body {
+            background:#101d32;
+            color:white;
+            font-family:Arial,sans-serif;
+            text-align:center;
+            padding:50px 15px;
+          }
+          .card {
+            max-width:420px;
+            margin:auto;
+            padding:30px;
+            border-radius:20px;
+            background:#1b3150;
+          }
+          .status {color:#54e49b;font-weight:bold}
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>🤖 Bangla Smart Tools</h1>
+          <h3 class="status">● Server Online</h3>
+          <p>Professional AI Telegram Assistant</p>
+          <p>Version 7.0.0</p>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
-app.get("/health", (_req, res) => {
+app.get("/health", (req, res) => {
   res.json({
-    status: "OK",
-    bot: "Bangla Smart Tools",
-    ai: Boolean(ai)
+    status: "ok",
+    app: "Bangla Smart Tools",
+    version: "7.0.0",
+    uptime: Math.round(process.uptime()),
+    time: new Date().toISOString()
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
 
-// ==================================
-// SESSION
-// ==================================
+// ==========================================
+// 3. LANGUAGE DATABASE
+// ==========================================
 
-const sessions = new Map();
-const audioTexts = new Map();
+const LANGUAGES = [
+  { code: "en", name: "English", flag: "🇬🇧", tts: "en" },
+  { code: "ar", name: "Arabic", flag: "🇸🇦", tts: "ar" },
+  { code: "hi", name: "Hindi", flag: "🇮🇳", tts: "hi" },
+  { code: "ur", name: "Urdu", flag: "🇵🇰", tts: "ur" },
+  { code: "fr", name: "French", flag: "🇫🇷", tts: "fr" },
+  { code: "de", name: "German", flag: "🇩🇪", tts: "de" },
+  { code: "es", name: "Spanish", flag: "🇪🇸", tts: "es" },
+  { code: "it", name: "Italian", flag: "🇮🇹", tts: "it" },
+  { code: "pt", name: "Portuguese", flag: "🇵🇹", tts: "pt" },
+  { code: "ru", name: "Russian", flag: "🇷🇺", tts: "ru" },
+  { code: "zh", name: "Chinese", flag: "🇨🇳", tts: "zh-CN" },
+  { code: "ja", name: "Japanese", flag: "🇯🇵", tts: "ja" },
+  { code: "ko", name: "Korean", flag: "🇰🇷", tts: "ko" },
+  { code: "tr", name: "Turkish", flag: "🇹🇷", tts: "tr" },
+  { code: "id", name: "Indonesian", flag: "🇮🇩", tts: "id" },
+  { code: "ms", name: "Malay", flag: "🇲🇾", tts: "ms" },
+  { code: "th", name: "Thai", flag: "🇹🇭", tts: "th" },
+  { code: "vi", name: "Vietnamese", flag: "🇻🇳", tts: "vi" },
+  { code: "nl", name: "Dutch", flag: "🇳🇱", tts: "nl" },
+  { code: "pl", name: "Polish", flag: "🇵🇱", tts: "pl" },
+  { code: "uk", name: "Ukrainian", flag: "🇺🇦", tts: "uk" },
+  { code: "fa", name: "Persian", flag: "🇮🇷", tts: "fa" },
+  { code: "he", name: "Hebrew", flag: "🇮🇱", tts: "he" },
+  { code: "el", name: "Greek", flag: "🇬🇷", tts: "el" },
+  { code: "sv", name: "Swedish", flag: "🇸🇪", tts: "sv" },
+  { code: "da", name: "Danish", flag: "🇩🇰", tts: "da" },
+  { code: "no", name: "Norwegian", flag: "🇳🇴", tts: "no" },
+  { code: "fi", name: "Finnish", flag: "🇫🇮", tts: "fi" },
+  { code: "ro", name: "Romanian", flag: "🇷🇴", tts: "ro" },
+  { code: "cs", name: "Czech", flag: "🇨🇿", tts: "cs" },
+  { code: "hu", name: "Hungarian", flag: "🇭🇺", tts: "hu" },
+  { code: "bn", name: "Bengali", flag: "🇧🇩", tts: "bn" },
+  { code: "ne", name: "Nepali", flag: "🇳🇵", tts: "ne" },
+  { code: "ta", name: "Tamil", flag: "🇮🇳", tts: "ta" },
+  { code: "te", name: "Telugu", flag: "🇮🇳", tts: "te" },
+  { code: "mr", name: "Marathi", flag: "🇮🇳", tts: "mr" },
+  { code: "sw", name: "Swahili", flag: "🇰🇪", tts: "sw" },
+  { code: "af", name: "Afrikaans", flag: "🇿🇦", tts: "af" }
+];
 
-function getSession(id) {
-  if (!sessions.has(id)) {
-    sessions.set(id, {
-      mode: "menu",
-      platform: null,
-      language: null,
-      expression: ""
-    });
-  }
+// ==========================================
+// 4. MAIN MENU
+// ==========================================
 
-  return sessions.get(id);
-}
-
-// ==================================
-// MAIN MENU
-// ==================================
-
-const mainMenu = {
+const MAIN_MENU = {
   keyboard: [
-    ["✍️ AI অটো পোস্ট", "🎬 ভিডিও কনটেন্ট"],
-    ["🧮 ক্যালকুলেটর", "🌐 অনুবাদ"],
-    ["📱 সোশ্যাল ক্যাপশন", "🔢 সংখ্যা রূপান্তর"],
-    ["📚 গণিতের সূত্র", "ℹ️ About"],
-    ["🏠 মেইন মেনু"]
+    [{ text: "🤖 AI Assistant" }, { text: "🌍 ভাষা অনুবাদ" }],
+    [{ text: "🎓 ভাষা শিখুন" }, { text: "🎙️ ভয়েস ইনপুট" }],
+    [{ text: "🔊 শেষ উত্তর শুনুন" }, { text: "🧮 ক্যালকুলেটর" }],
+    [{ text: "✍️ AI কনটেন্ট" }, { text: "🎬 ভিডিও কনটেন্ট" }],
+    [{ text: "📝 সোশ্যাল ক্যাপশন" }, { text: "🔢 নাম্বার কনভার্টার" }],
+    [{ text: "📚 গণিতের সূত্র" }, { text: "🖼️ ছবি থেকে লেখা" }],
+    [{ text: "📄 PDF Assistant" }, { text: "🔎 লাইভ তথ্য" }],
+    [{ text: "ℹ️ About" }, { text: "❓ Help" }],
+    [{ text: "🏠 Home" }, { text: "🔄 Reset Chat" }]
   ],
   resize_keyboard: true,
-  is_persistent: true
+  is_persistent: true,
+  input_field_placeholder: "এখানে লিখুন অথবা ভয়েস পাঠান..."
 };
 
-// ==================================
-// AUDIO SYSTEM
-// ==================================
+const HOME_TEXT = `
+🌟 স্বাগতম Bangla Smart Tools-এ!
 
-function audioKeyboard(text, lang = "bn") {
-  const id = randomUUID().slice(0, 12);
+আপনার ব্যক্তিগত AI সহকারী।
 
-  audioTexts.set(id, {
-    text: String(text).slice(0, 5000),
-    lang
-  });
+🤖 AI Chat
+🌍 Smart Translator
+🎓 Language Learning
+🎙️ Voice Assistant
+🧮 Advanced Calculator
+✍️ AI Content Studio
+🎬 Video Studio
+🖼️ Image to Text
+📄 PDF Assistant
+🔎 Live Information
 
-  if (audioTexts.size > 500) {
-    const oldest = audioTexts.keys().next().value;
-    audioTexts.delete(oldest);
-  }
+নিচের মেনু থেকে একটি সেবা নির্বাচন করুন।
+`;
 
-  return {
-    inline_keyboard: [[
-      {
-        text: "🔊 লেখা শুনুন",
-        callback_data: `speak:${id}`
-      },
-      {
-        text: "🏠 মেইন মেনু",
-        callback_data: "home"
-      }
-    ]]
-  };
-}
+// ==========================================
+// 5. SESSION AND RATE LIMIT
+// ==========================================
 
-function splitMessage(text, max = 3800) {
-  const result = [];
-  let remaining = String(text);
+const sessions = new Map();
+const userLimits = new Map();
+const lastAnswers = new Map();
 
-  while (remaining.length > max) {
-    let cut = remaining.lastIndexOf("\n", max);
-
-    if (cut < max * 0.5) {
-      cut = max;
-    }
-
-    result.push(remaining.slice(0, cut));
-    remaining = remaining.slice(cut).trimStart();
-  }
-
-  if (remaining) {
-    result.push(remaining);
-  }
-
-  return result.length ? result : [""];
-}
-
-async function sendRichText(chatId, text, options = {}, lang = "bn") {
-  const safeText = String(text || "কোনো লেখা পাওয়া যায়নি।");
-  const chunks = splitMessage(safeText, 3800);
-
-  for (let i = 0; i < chunks.length; i++) {
-    const isLast = i === chunks.length - 1;
-
-    await bot.sendMessage(chatId, chunks[i], {
-      ...options,
-      ...(isLast
-        ? { reply_markup: audioKeyboard(safeText, lang) }
-        : {})
+function getSession(userId) {
+  if (!sessions.has(userId)) {
+    sessions.set(userId, {
+      mode: "chat",
+      history: [],
+      targetLanguage: null,
+      sourceLanguage: null,
+      lastActivity: Date.now()
     });
   }
+
+  const session = sessions.get(userId);
+  session.lastActivity = Date.now();
+  return session;
 }
 
-function splitForSpeech(text, max = 180) {
-  const words = String(text)
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ");
+function checkRateLimit(userId) {
+  const now = Date.now();
+  const previous = userLimits.get(userId) || [];
+
+  const recent = previous.filter(
+    time => now - time < 60000
+  );
+
+  if (recent.length >= 12) {
+    return false;
+  }
+
+  recent.push(now);
+  userLimits.set(userId, recent);
+  return true;
+}
+
+// Clean inactive sessions every 30 minutes.
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+
+  for (const [id, session] of sessions.entries()) {
+    if (session.lastActivity < cutoff) {
+      sessions.delete(id);
+      lastAnswers.delete(id);
+      userLimits.delete(id);
+    }
+  }
+}, 30 * 60 * 1000).unref();
+
+// ==========================================
+// 6. COMMON HELPERS
+// ==========================================
+
+async function sendText(chatId, text, extra = {}) {
+  const safeText = String(text || "কোনো উত্তর পাওয়া যায়নি।");
 
   const chunks = [];
-  let current = "";
-
-  for (const word of words) {
-    if ((current + " " + word).trim().length > max && current) {
-      chunks.push(current);
-      current = word;
-    } else {
-      current = (current + " " + word).trim();
-    }
+  for (let i = 0; i < safeText.length; i += 3800) {
+    chunks.push(safeText.slice(i, i + 3800));
   }
 
-  if (current) chunks.push(current);
-
-  return chunks.slice(0, 12);
-}
-
-async function sendSpeech(chatId, text, lang) {
-  const parts = splitForSpeech(text);
-
-  if (!parts.length) {
-    throw new Error("শোনার মতো লেখা পাওয়া যায়নি।");
-  }
-
-  await bot.sendMessage(
-    chatId,
-    `🔊 অডিও তৈরি হচ্ছে (${parts.length} অংশ)...`
-  );
-
-  for (const part of parts) {
-    const url = getAudioUrl(part, {
-      lang: lang || "bn",
-      slow: false,
-      host: "https://translate.google.com"
+  for (let i = 0; i < chunks.length; i++) {
+    await bot.sendMessage(chatId, chunks[i], {
+      ...extra,
+      reply_markup:
+        i === chunks.length - 1
+          ? (extra.reply_markup || MAIN_MENU)
+          : undefined
     });
-
-    await bot.sendVoice(chatId, url);
   }
 }
 
-// ==================================
-// HOME
-// ==================================
-
-async function showHome(chatId, name = "বন্ধু") {
-  const s = getSession(chatId);
-
-  s.mode = "menu";
-  s.platform = null;
-  s.language = null;
-  s.expression = "";
-
-  return bot.sendMessage(
-    chatId,
-    `🌟 স্বাগতম ${name}!
-
-🤖 BANGLA SMART TOOLS
-
-আপনার AI ডিজিটাল সহকারী।
-
-✍️ AI দিয়ে পোস্ট ও ক্যাপশন
-🎬 ভিডিও টাইটেল ও বিবরণ
-🧮 সাধারণ ও উন্নত ক্যালকুলেটর
-🌐 দ্বিমুখী বহু ভাষার অনুবাদ
-🔊 লেখা শুনুন — Audio Support
-
-নিচের মেনু থেকে একটি ফিচার নির্বাচন করুন।`,
-    { reply_markup: mainMenu }
-  );
+async function typing(chatId) {
+  try {
+    await bot.sendChatAction(chatId, "typing");
+  } catch {}
 }
 
-// ==================================
-// ABOUT
-// ==================================
-
-const ABOUT_TEXT =
-  "🌟 ABOUT BANGLA SMART TOOLS\n\n" +
-  "Bangla Smart Tools একটি AI-ভিত্তিক বহুমুখী ডিজিটাল সহকারী।\n\n" +
-  "✨ আমাদের সুবিধাসমূহ:\n\n" +
-  "✍️ AI Auto Post — বিভিন্ন সোশ্যাল প্ল্যাটফর্মের পোস্ট।\n\n" +
-  "🎬 Video Content — টাইটেল, বিবরণ ও আইডিয়া।\n\n" +
-  "🧮 Smart Calculator — সাধারণ ও উন্নত হিসাব।\n\n" +
-  "🌐 Translator — বাংলা, আরবি, ইংরেজিসহ বহু ভাষায় অনুবাদ।\n\n" +
-  "🔊 Text to Speech — সমর্থিত ভাষায় লেখা শুনুন।\n\n" +
-  "🔢 Number Converter — বাংলা ও ইংরেজি সংখ্যা।\n\n" +
-  "📚 Math Formulas — প্রয়োজনীয় গণিতের সূত্র।\n\n" +
-  "🎯 আমাদের লক্ষ্য: প্রযুক্তিকে সহজ ও সবার ব্যবহার উপযোগী করা।\n\n" +
-  "ধন্যবাদ Bangla Smart Tools ব্যবহার করার জন্য। ❤️";
-
-// ==================================
-// GEMINI AI
-// ==================================
-
-async function askAI(prompt) {
-  if (!ai) {
-    throw new Error(
-      "Gemini API Key সেট করা নেই। Render Environment-এ GEMINI_API_KEY যোগ করুন।"
-    );
-  }
-
-  const result = await ai.interactions.create({
-    model: MODEL,
-    input: prompt
-  });
-
-  const answer = result?.output_text?.trim();
-
-  if (!answer) {
-    throw new Error("AI থেকে কোনো লেখা পাওয়া যায়নি।");
-  }
-
-  return answer;
+function getLanguage(code) {
+  return LANGUAGES.find(item => item.code === code);
 }
-
-// ==================================
-// AI POST WRITER
-// ==================================
-
-const platforms = [
-  ["🔵 Facebook", "facebook"],
-  ["🎵 TikTok", "tiktok"],
-  ["▶️ YouTube", "youtube"],
-  ["📸 Instagram", "instagram"],
-  ["✈️ Telegram", "telegram"],
-  ["𝕏 X / Twitter", "x"],
-  ["💼 LinkedIn", "linkedin"],
-  ["🌍 সব প্ল্যাটফর্ম", "all"]
-];
-
-const platformNames = {
-  facebook: "Facebook",
-  tiktok: "TikTok",
-  youtube: "YouTube",
-  instagram: "Instagram",
-  telegram: "Telegram",
-  x: "X / Twitter",
-  linkedin: "LinkedIn",
-  all: "সব প্ল্যাটফর্ম"
-};
-
-function platformKeyboard() {
-  const rows = [];
-
-  for (let i = 0; i < platforms.length; i += 2) {
-    rows.push(
-      platforms.slice(i, i + 2).map(p => ({
-        text: p[0],
-        callback_data: "platform:" + p[1]
-      }))
-    );
-  }
-
-  rows.push([
-    {
-      text: "🏠 মেইন মেনু",
-      callback_data: "home"
-    }
-  ]);
-
-  return { inline_keyboard: rows };
-}
-
-function startPost(chatId) {
-  const s = getSession(chatId);
-
-  s.mode = "choose_platform";
-  s.platform = null;
-
-  return bot.sendMessage(
-    chatId,
-    "✍️ AI AUTO POST STUDIO\n\nকোন প্ল্যাটফর্মের জন্য কনটেন্ট চান?",
-    { reply_markup: platformKeyboard() }
-  );
-}
-
-async function generatePost(topic, platform) {
-  const instructions = {
-    facebook:
-      "Facebook-এর জন্য শিরোনাম, আকর্ষণীয় মূল লেখা, CTA ও হ্যাশট্যাগ দিন।",
-
-    tiktok:
-      "TikTok-এর জন্য Hook, ছোট ক্যাপশন, ভিডিও আইডিয়া ও হ্যাশট্যাগ দিন।",
-
-    youtube:
-      "YouTube-এর জন্য ৩টি Title, Description, Hashtags ও Tags দিন।",
-
-    instagram:
-      "Instagram-এর জন্য Caption, Emoji ও Hashtags দিন।",
-
-    telegram:
-      "Telegram চ্যানেলের জন্য শিরোনাম, পোস্ট ও হ্যাশট্যাগ দিন।",
-
-    x:
-      "X-এর জন্য সংক্ষিপ্ত, আকর্ষণীয় পোস্ট লিখুন।",
-
-    linkedin:
-      "LinkedIn-এর জন্য পেশাদার ও তথ্যবহুল পোস্ট লিখুন।",
-
-    all:
-      "Facebook, TikTok, YouTube, Instagram, Telegram, X ও LinkedIn-এর জন্য আলাদা কনটেন্ট তৈরি করুন।"
-  };
-
-  return askAI(`
-আপনি একজন দক্ষ বাংলা ও ইংরেজি কনটেন্ট রাইটার।
-
-বিষয়: ${topic}
-
-প্ল্যাটফর্ম: ${platformNames[platform] || platform}
-
-কাজ:
-${instructions[platform] || instructions.facebook}
-
-নিয়ম:
-- শুদ্ধ ও স্বাভাবিক ভাষা ব্যবহার করুন।
-- প্রাসঙ্গিক ইমোজি দিন।
-- প্রাসঙ্গিক হ্যাশট্যাগ দিন।
-- মিথ্যা তথ্য বানাবেন না।
-- কপি করার উপযোগী লেখা দিন।
-`);
-}
-
-// ==================================
-// VIDEO CONTENT
-// ==================================
-
-async function generateVideo(topic) {
-  return askAI(`
-আপনি একজন ভিডিও কনটেন্ট বিশেষজ্ঞ।
-
-ভিডিওর বিষয়: ${topic}
-
-বাংলায় তৈরি করুন:
-
-1. পাঁচটি আকর্ষণীয় ভিডিও Title
-2. SEO Description
-3. Hashtags
-4. YouTube Tags
-5. Thumbnail-এর জন্য তিনটি ছোট বাক্য
-6. ভিডিওর সংক্ষিপ্ত Outline
-
-কোনো মিথ্যা দাবি করবেন না।
-`);
-}
-
-// ==================================
-// CALCULATOR
-// ==================================
-
-function normalize(input) {
-  const bn = "০১২৩৪৫৬৭৮৯";
-
-  return String(input)
-    .replace(/[০-৯]/g, d => bn.indexOf(d))
-    .replace(/×/g, "*")
-    .replace(/÷/g, "/")
-    .replace(/[−–]/g, "-")
-    .replace(/π/g, "pi")
-    .replace(/,/g, "")
-    .replace(/\s+/g, "");
-}
-
-const allowedFunctions = new Set([
-  "sqrt", "abs", "sin", "cos", "tan",
-  "asin", "acos", "atan", "sinh", "cosh",
-  "tanh", "log", "log10", "exp",
-  "floor", "ceil", "round", "factorial",
-  "min", "max", "pow"
-]);
-
-function calculate(input) {
-  const expression = normalize(input);
-
-  if (!expression || expression.length > 100) {
-    throw new Error("সঠিক হিসাব লিখুন।");
-  }
-
-  const tree = math.parse(expression);
-
-  tree.traverse(node => {
-    if (node.type === "ConstantNode") {
-      if (typeof node.value !== "number") {
-        throw new Error("শুধু সংখ্যা ব্যবহার করুন।");
-      }
-    } else if (node.type === "SymbolNode") {
-      if (!["pi", "e"].includes(node.name)) {
-        throw new Error("অনুমোদিত নয়: " + node.name);
-      }
-    } else if (node.type === "OperatorNode") {
-      if (!["+", "-", "*", "/", "%", "^", "!"].includes(node.op)) {
-        throw new Error("অপারেটর অনুমোদিত নয়।");
-      }
-    } else if (node.type === "FunctionNode") {
-      const functionName = node.fn?.name;
-
-      if (!allowedFunctions.has(functionName)) {
-        throw new Error("এই ফাংশন অনুমোদিত নয়।");
-      }
-    } else if (node.type !== "ParenthesisNode") {
-      throw new Error("এই ইনপুট গ্রহণযোগ্য নয়।");
-    }
-  });
-
-  const answer = tree.evaluate();
-
-  if (typeof answer !== "number" || !Number.isFinite(answer)) {
-    throw new Error("ফলাফল নির্ণয় করা যায়নি।");
-  }
-
-  return {
-    expression,
-    answer: math.format(answer, { precision: 14 })
-  };
-}
-
-const calcRows = [
-  ["C", "(", ")", "⌫"],
-  ["7", "8", "9", "÷"],
-  ["4", "5", "6", "×"],
-  ["1", "2", "3", "−"],
-  ["0", ".", "^", "+"],
-  ["√", "x²", "x³", "%"],
-  ["sin", "cos", "tan", "log"],
-  ["π", "e", "!", "="],
-  ["🏠 মেনু"]
-];
-
-function calcKeyboard() {
-  return {
-    inline_keyboard: calcRows.map(row =>
-      row.map(key => ({
-        text: key,
-        callback_data: "calc:" + key
-      }))
-    )
-  };
-}
-
-function showCalculator(chatId) {
-  const s = getSession(chatId);
-
-  s.mode = "calculator";
-  s.expression = "";
-
-  return bot.sendMessage(
-    chatId,
-    "🧮 SMART CALCULATOR\n\n" +
-    "বাংলা বা ইংরেজি সংখ্যা ব্যবহার করুন।\n" +
-    "উদাহরণ: ২৫ × ১২ + ৫০\n\n" +
-    "sin, cos, tan ও log-এর ক্ষেত্রে বন্ধনী বন্ধ করুন।",
-    { reply_markup: calcKeyboard() }
-  );
-}
-
-// ==================================
-// MULTI-LANGUAGE TRANSLATOR
-// ==================================
-
-const languages = [
-  ["🇧🇩 বাংলা", "bn"],
-  ["🇬🇧 English", "en"],
-  ["🇸🇦 العربية (Arabic)", "ar"],
-  ["🇮🇳 हिन्दी (Hindi)", "hi"],
-  ["🇵🇰 اردو (Urdu)", "ur"],
-  ["🇫🇷 Français", "fr"],
-  ["🇩🇪 Deutsch", "de"],
-  ["🇪🇸 Español", "es"],
-  ["🇨🇳 中文", "zh"],
-  ["🇯🇵 日本語", "ja"],
-  ["🇰🇷 한국어", "ko"],
-  ["🇹🇷 Türkçe", "tr"],
-  ["🇮🇷 فارسی", "fa"],
-  ["🇮🇩 Indonesia", "id"],
-  ["🇲🇾 Melayu", "ms"],
-  ["🇹🇭 ไทย", "th"],
-  ["🇻🇳 Tiếng Việt", "vi"],
-  ["🇷🇺 Русский", "ru"],
-  ["🇮🇹 Italiano", "it"],
-  ["🇵🇹 Português", "pt"],
-  ["🇳🇱 Nederlands", "nl"],
-  ["🇵🇱 Polski", "pl"],
-  ["🇺🇦 Українська", "uk"],
-  ["🇬🇷 Ελληνικά", "el"],
-  ["🇸🇪 Svenska", "sv"],
-  ["🇳🇴 Norsk", "no"],
-  ["🇩🇰 Dansk", "da"],
-  ["🇫🇮 Suomi", "fi"],
-  ["🇮🇱 עברית", "he"],
-  ["🇳🇵 नेपाली", "ne"],
-  ["🇱🇰 සිංහල", "si"],
-  ["🇰🇪 Kiswahili", "sw"]
-];
 
 function languageKeyboard(page = 0) {
-  const selected = languages.slice(page * 10, page * 10 + 10);
+  const perPage = 10;
+  const start = page * perPage;
+  const selected = LANGUAGES.slice(start, start + perPage);
+
   const rows = [];
 
   for (let i = 0; i < selected.length; i += 2) {
     rows.push(
       selected.slice(i, i + 2).map(lang => ({
-        text: lang[0],
-        callback_data: "lang:" + lang[1]
+        text: `${lang.flag} ${lang.name}`,
+        callback_data: `lang_${lang.code}`
       }))
     );
   }
 
-  const nav = [];
+  const navigation = [];
 
   if (page > 0) {
-    nav.push({
+    navigation.push({
       text: "⬅️ আগের",
-      callback_data: "langpage:" + (page - 1)
+      callback_data: `langpage_${page - 1}`
     });
   }
 
-  if ((page + 1) * 10 < languages.length) {
-    nav.push({
+  if (start + perPage < LANGUAGES.length) {
+    navigation.push({
       text: "পরের ➡️",
-      callback_data: "langpage:" + (page + 1)
+      callback_data: `langpage_${page + 1}`
     });
   }
 
-  if (nav.length) rows.push(nav);
+  if (navigation.length) rows.push(navigation);
 
   rows.push([
-    {
-      text: "🏠 মেইন মেনু",
-      callback_data: "home"
-    }
+    { text: "🇧🇩 বাংলায় অনুবাদ", callback_data: "lang_bn" }
   ]);
 
   return { inline_keyboard: rows };
 }
 
-function showLanguages(chatId) {
-  const s = getSession(chatId);
+// ==========================================
+// 7. GEMINI AI ENGINE
+// ==========================================
 
-  s.mode = "translation";
-  s.language = null;
+const SYSTEM_INSTRUCTION = `
+তুমি Bangla Smart Tools-এর একজন উন্নত, সহায়ক AI Assistant।
 
-  return bot.sendMessage(
+নিয়ম:
+- ব্যবহারকারী বাংলায় লিখলে বাংলায় উত্তর দাও।
+- ব্যবহারকারীর ভাষা বুঝে উত্তর দাও।
+- সহজ, নির্ভুল ও পরিষ্কার ভাষা ব্যবহার করো।
+- প্রয়োজন হলে উদাহরণ দাও।
+- গণিতে ধাপে ধাপে ব্যাখ্যা করো।
+- অনুবাদে মূল অর্থ ও স্বাভাবিক ভাষা বজায় রাখো।
+- বানানো তথ্যকে সত্য বলে উপস্থাপন করবে না।
+- লাইভ তথ্য না পেলে সেটি স্পষ্ট করে বলবে।
+- ব্যবহারকারীর ব্যক্তিগত তথ্য অপ্রয়োজনে চাইবে না।
+- কোনো API key, password বা secret চাইবে না।
+`;
+
+async function askAI(userId, prompt, options = {}) {
+  const session = getSession(userId);
+
+  const history = session.history.slice(-10);
+
+  const contents = [
+    ...history,
+    {
+      role: "user",
+      parts: [{ text: prompt }]
+    }
+  ];
+
+  const config = {
+    systemInstruction: SYSTEM_INSTRUCTION,
+    temperature: options.temperature ?? 0.5
+  };
+
+  if (options.liveSearch && ENABLE_GOOGLE_SEARCH) {
+    config.tools = [{ googleSearch: {} }];
+  }
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents,
+    config
+  });
+
+  const answer = response.text?.trim();
+
+  if (!answer) {
+    throw new Error("AI থেকে খালি উত্তর এসেছে।");
+  }
+
+  session.history.push(
+    { role: "user", parts: [{ text: prompt }] },
+    { role: "model", parts: [{ text: answer }] }
+  );
+
+  session.history = session.history.slice(-20);
+
+  lastAnswers.set(userId, answer);
+
+  return answer;
+}
+
+// ==========================================
+// 8. TEXT TO SPEECH
+// ==========================================
+
+function splitForSpeech(text, maxLength = 180) {
+  const words = String(text).split(/\s+/);
+  const chunks = [];
+  let current = "";
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+
+    if (next.length > maxLength && current) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function detectTTSLanguage(text) {
+  if (/[\u0980-\u09FF]/.test(text)) return "bn";
+  if (/[\u0600-\u06FF]/.test(text)) return "ar";
+  if (/[\u0900-\u097F]/.test(text)) return "hi";
+  if (/[\u4E00-\u9FFF]/.test(text)) return "zh-CN";
+  if (/[\u3040-\u30FF]/.test(text)) return "ja";
+  if (/[\uAC00-\uD7AF]/.test(text)) return "ko";
+  return "en";
+}
+
+async function speakText(chatId, text, language = null) {
+  const lang = language || detectTTSLanguage(text);
+  const chunks = splitForSpeech(text, 180).slice(0, 8);
+
+  await bot.sendMessage(
     chatId,
-    "🌐 অনুবাদ\n\n" +
-    "যে ভাষায় অনুবাদ চান সেটি নির্বাচন করুন।\n" +
-    "বট আপনার লেখার মূল ভাষা নিজে শনাক্ত করবে।\n\n" +
-    "উদাহরণ: আরবি লেখা দিয়ে বাংলা নির্বাচন করলে আরবি → বাংলা হবে।",
-    { reply_markup: languageKeyboard(0) }
+    "🔊 অডিও তৈরি হচ্ছে...",
+    { reply_markup: MAIN_MENU }
+  );
+
+  for (const chunk of chunks) {
+    try {
+      const audioUrl = getAudioUrl(chunk, {
+        lang,
+        slow: false,
+        host: "https://translate.google.com"
+      });
+
+      await bot.sendAudio(chatId, audioUrl, {
+        title: "Bangla Smart Tools Voice",
+        performer: "AI Assistant"
+      });
+    } catch (error) {
+      console.error("TTS error:", error.message);
+      await bot.sendMessage(
+        chatId,
+        "এই অংশের অডিও তৈরি করা যায়নি। লেখাটি আবার চেষ্টা করুন।"
+      );
+      break;
+    }
+  }
+}
+
+// ==========================================
+// 9. TRANSLATION
+// ==========================================
+
+async function translateText(userId, text, targetCode) {
+  const target = getLanguage(targetCode);
+
+  if (!target) {
+    throw new Error("ভাষাটি পাওয়া যায়নি।");
+  }
+
+  const prompt = `
+নিচের লেখাটি স্বাভাবিক, নির্ভুল ও অর্থ অক্ষুণ্ণ রেখে
+${target.name} ভাষায় অনুবাদ করো।
+
+নিয়ম:
+- শুধু অনুবাদ দেবে।
+- মূল লেখার অর্থ পরিবর্তন করবে না।
+- নাম, সংখ্যা ও প্রয়োজনীয় চিহ্ন ঠিক রাখবে।
+- অপ্রয়োজনীয় ব্যাখ্যা দেবে না।
+
+লেখা:
+${text}
+`;
+
+  return askAI(userId, prompt, { temperature: 0.2 });
+}
+
+// ==========================================
+// 10. CALCULATOR
+// ==========================================
+
+function calculate(expression) {
+  const input = String(expression).trim();
+
+  if (!input || input.length > 200) {
+    throw new Error("হিসাবটি সঠিকভাবে লিখুন।");
+  }
+
+  if (!/^[0-9+\-*/().,%^\sA-Za-z]+$/.test(input)) {
+    throw new Error("এই ধরনের ইনপুট অনুমোদিত নয়।");
+  }
+
+  const forbidden = [
+    "import", "createUnit", "evaluate",
+    "parse", "simplify", "derivative",
+    "resolve", "help", "function",
+    "expression", "compile"
+  ];
+
+  const lower = input.toLowerCase();
+
+  if (
+    forbidden.some(word => lower.includes(word)) ||
+    /[=;{}\[\]]/.test(input)
+  ) {
+    throw new Error("নিরাপত্তার কারণে এই এক্সপ্রেশন গ্রহণ করা হয়নি।");
+  }
+
+  const result = evaluate(input, {
+    pi: Math.PI,
+    e: Math.E
+  });
+
+  if (
+    typeof result !== "number" ||
+    !Number.isFinite(result)
+  ) {
+    throw new Error("এই হিসাবের উত্তর পাওয়া যায়নি।");
+  }
+
+  return result;
+}
+
+async function explainCalculation(userId, expression, result) {
+  return askAI(
+    userId,
+    `এই গণিতটি ধাপে ধাপে বাংলায় ব্যাখ্যা করো।
+     হিসাব: ${expression}
+     সঠিক ফলাফল: ${result}
+     ফলাফল পরিবর্তন করবে না।`,
+    { temperature: 0.2 }
   );
 }
 
-async function translateText(text, targetCode) {
-  const target =
-    languages.find(item => item[1] === targetCode)?.[0] || targetCode;
+// ==========================================
+// 11. NUMBER CONVERTER
+// ==========================================
 
-  return askAI(`
-Translate the text below into the language identified by code "${targetCode}" (${target}).
+function numberToBangla(number) {
+  const digits = "০১২৩৪৫৬৭৮৯";
 
-Automatically detect the source language.
-Preserve meaning, names, numbers and tone.
-If the source is already the target language, return it unchanged.
-Do not explain.
-Do not add quotation marks.
-Return only the translation.
-
-TEXT:
-${text}
-`);
+  return String(number).replace(/[0-9]/g, digit =>
+    digits[Number(digit)]
+  );
 }
 
-// ==================================
-// NUMBER CONVERTER
-// ==================================
+function numberToWords(num) {
+  const n = Number(num);
 
-function convertDigits(value, toBengali) {
-  const bn = "০১২৩৪৫৬৭৮৯";
-  const en = "0123456789";
+  if (!Number.isInteger(n) || n < 0 || n > 999999999) {
+    return "০ থেকে ৯৯৯৯৯৯৯৯৯ পর্যন্ত পূর্ণসংখ্যা দিন।";
+  }
 
-  return String(value).replace(/[0-9০-৯]/g, d => {
-    if (toBengali) {
-      const index = en.indexOf(d);
-      return index >= 0 ? bn[index] : d;
+  if (n === 0) return "শূন্য";
+
+  const ones = [
+    "", "এক", "দুই", "তিন", "চার", "পাঁচ",
+    "ছয়", "সাত", "আট", "নয়", "দশ",
+    "এগারো", "বারো", "তেরো", "চৌদ্দ",
+    "পনেরো", "ষোলো", "সতেরো", "আঠারো",
+    "উনিশ"
+  ];
+
+  const tens = [
+    "", "", "বিশ", "ত্রিশ", "চল্লিশ",
+    "পঞ্চাশ", "ষাট", "সত্তর", "আশি", "নব্বই"
+  ];
+
+  function twoDigit(x) {
+    if (x < 20) return ones[x];
+    const t = Math.floor(x / 10);
+    const r = x % 10;
+    return tens[t] + (r ? " " + ones[r] : "");
+  }
+
+  function convert(x) {
+    if (x < 100) return twoDigit(x);
+
+    if (x < 1000) {
+      const h = Math.floor(x / 100);
+      const r = x % 100;
+      return ones[h] + "শ" + (r ? " " + convert(r) : "");
     }
 
-    const index = bn.indexOf(d);
-    return index >= 0 ? en[index] : d;
+    if (x < 100000) {
+      const h = Math.floor(x / 1000);
+      const r = x % 1000;
+      return convert(h) + " হাজার" + (r ? " " + convert(r) : "");
+    }
+
+    if (x < 10000000) {
+      const h = Math.floor(x / 100000);
+      const r = x % 100000;
+      return convert(h) + " লক্ষ" + (r ? " " + convert(r) : "");
+    }
+
+    const h = Math.floor(x / 10000000);
+    const r = x % 10000000;
+
+    return convert(h) + " কোটি" + (r ? " " + convert(r) : "");
+  }
+
+  return convert(n);
+}
+
+// ==========================================
+// 12. MAIN MENU HANDLERS
+// ==========================================
+
+async function showHome(chatId) {
+  await bot.sendMessage(chatId, HOME_TEXT, {
+    reply_markup: MAIN_MENU
   });
 }
 
-// ==================================
-// MATH FORMULAS
-// ==================================
+async function showLanguageMenu(chatId) {
+  await bot.sendMessage(
+    chatId,
+    "🌍 কোন ভাষায় অনুবাদ করতে চান?\n\nবাংলা থেকে নির্বাচিত ভাষায় এবং অন্য ভাষা থেকে বাংলায় অনুবাদ করা যাবে।",
+    {
+      reply_markup: languageKeyboard(0)
+    }
+  );
+}
 
-const formulas =
-  "📚 গণিতের প্রয়োজনীয় সূত্র\n\n" +
-  "বর্গক্ষেত্রের ক্ষেত্রফল = বাহু × বাহু\n" +
-  "আয়তক্ষেত্রের ক্ষেত্রফল = দৈর্ঘ্য × প্রস্থ\n" +
-  "ত্রিভুজের ক্ষেত্রফল = ½ × ভূমি × উচ্চতা\n" +
-  "বৃত্তের ক্ষেত্রফল = π × r²\n" +
-  "বৃত্তের পরিধি = 2πr\n\n" +
-  "(a+b)² = a² + 2ab + b²\n" +
-  "(a-b)² = a² - 2ab + b²\n" +
-  "a²-b² = (a-b)(a+b)";
+async function showHelp(chatId) {
+  await sendText(chatId, `
+❓ Bangla Smart Tools Help
 
-// ==================================
-// CALLBACK HANDLER
-// ==================================
+🤖 AI Assistant:
+যেকোনো প্রশ্ন লিখুন।
+
+🌍 ভাষা অনুবাদ:
+ভাষা নির্বাচন করুন, তারপর লেখা পাঠান।
+
+🎓 ভাষা শিখুন:
+যে ভাষা শিখতে চান তার নাম লিখুন।
+
+🎙️ ভয়েস ইনপুট:
+Telegram-এর মাইক্রোফোন দিয়ে Voice Message পাঠান।
+
+🔊 শেষ উত্তর শুনুন:
+AI-এর সর্বশেষ উত্তর অডিওতে শুনুন।
+
+🧮 Calculator:
+যেমন: ২৫+৫০ অথবা 25*5
+
+✍️ AI Content:
+পোস্টের বিষয় লিখুন।
+
+🎬 Video:
+ভিডিওর বিষয় লিখুন।
+
+🖼️ Image to Text:
+ছবি পাঠান।
+
+📄 PDF Assistant:
+PDF ফাইল পাঠান।
+
+🏠 Home:
+মূল মেনুতে ফিরুন।
+`);
+}
+
+// ==========================================
+// 13. MENU ROUTER
+// ==========================================
+
+async function handleMenu(chatId, userId, text) {
+  const session = getSession(userId);
+
+  switch (text) {
+    case "🏠 Home":
+      session.mode = "chat";
+      return showHome(chatId);
+
+    case "🤖 AI Assistant":
+      session.mode = "chat";
+      return sendText(
+        chatId,
+        "🤖 AI Assistant চালু হয়েছে।\nআপনার প্রশ্ন লিখুন।"
+      );
+
+    case "🌍 ভাষা অনুবাদ":
+      session.mode = "translate";
+      session.targetLanguage = null;
+      return showLanguageMenu(chatId);
+
+    case "🎓 ভাষা শিখুন":
+      session.mode = "learn";
+      return sendText(
+        chatId,
+        "🎓 কোন ভাষা শিখতে চান?\nযেমন: English, Arabic, Hindi, French লিখুন।"
+      );
+
+    case "🎙️ ভয়েস ইনপুট":
+      session.mode = "voice";
+      return sendText(
+        chatId,
+        "🎙️ এখন Telegram-এর মাইক্রোফোন দিয়ে Voice Message পাঠান।\nআমি সেটিকে লেখায় রূপান্তর করার চেষ্টা করব।"
+      );
+
+    case "🔊 শেষ উত্তর শুনুন": {
+      const answer = lastAnswers.get(userId);
+
+      if (!answer) {
+        return sendText(chatId, "এখনো শোনার মতো কোনো উত্তর নেই।");
+      }
+
+      return speakText(chatId, answer);
+    }
+
+    case "🧮 ক্যালকুলেটর":
+      session.mode = "calculator";
+      return sendText(
+        chatId,
+        "🧮 Advanced Calculator\n\nআপনার হিসাব লিখুন।\nউদাহরণ: (25+15)*2\n\nসমাধানের সঙ্গে ব্যাখ্যাও পাবেন।"
+      );
+
+    case "✍️ AI কনটেন্ট":
+      session.mode = "content";
+      return sendText(
+        chatId,
+        "✍️ কী বিষয়ে পোস্ট লিখতে চান?\nপ্ল্যাটফর্ম ও বিষয় লিখুন।"
+      );
+
+    case "🎬 ভিডিও কনটেন্ট":
+      session.mode = "video";
+      return sendText(
+        chatId,
+        "🎬 ভিডিওর বিষয় লিখুন।\nআমি স্ক্রিপ্ট, দৃশ্য ও ভয়েসওভার আইডিয়া তৈরি করব।"
+      );
+
+    case "📝 সোশ্যাল ক্যাপশন":
+      session.mode = "caption";
+      return sendText(
+        chatId,
+        "📝 ছবির বা ভিডিওর বিষয় লিখুন।\nআমি ক্যাপশন ও হ্যাশট্যাগ তৈরি করব।"
+      );
+
+    case "🔢 নাম্বার কনভার্টার":
+      session.mode = "number";
+      return sendText(
+        chatId,
+        "🔢 একটি সংখ্যা লিখুন।\nআমি সেটিকে বাংলা কথায় লিখে দেব।"
+      );
+
+    case "📚 গণিতের সূত্র":
+      session.mode = "formulas";
+      return sendText(
+        chatId,
+        "📚 কোন গণিতের সূত্র জানতে চান?\nযেমন: বীজগণিত, জ্যামিতি, ত্রিকোণমিতি, শতকরা।"
+      );
+
+    case "🖼️ ছবি থেকে লেখা":
+      session.mode = "image";
+      return sendText(
+        chatId,
+        "🖼️ একটি ছবি পাঠান।\nছবির মধ্যে থাকা লেখা শনাক্ত করার চেষ্টা করব।"
+      );
+
+    case "📄 PDF Assistant":
+      session.mode = "pdf";
+      return sendText(
+        chatId,
+        "📄 একটি PDF ফাইল পাঠান।\nআমি এর বিষয়বস্তু বুঝে সারাংশ বা প্রশ্নের উত্তর দিতে পারব।"
+      );
+
+    case "🔎 লাইভ তথ্য":
+      session.mode = "live";
+      return sendText(
+        chatId,
+        ENABLE_GOOGLE_SEARCH
+          ? "🔎 লাইভ তথ্য মোড চালু হয়েছে।\nআপনার প্রশ্ন লিখুন।"
+          : "লাইভ সার্চ চালু করতে Render-এ ENABLE_GOOGLE_SEARCH=true সেট করতে হবে।"
+      );
+
+    case "ℹ️ About":
+      return sendText(chatId, `
+🌟 Bangla Smart Tools
+
+একটি AI-powered Telegram Assistant।
+
+সুবিধা:
+• AI Chat
+• Smart Translation
+• Language Learning
+• Voice Input & Output
+• Advanced Calculator
+• Content & Video Studio
+• Image Text Recognition
+• PDF Assistant
+
+Version: 7.0.0
+`);
+
+    case "❓ Help":
+      return showHelp(chatId);
+
+    case "🔄 Reset Chat":
+      session.history = [];
+      session.mode = "chat";
+      session.targetLanguage = null;
+      lastAnswers.delete(userId);
+
+      return sendText(
+        chatId,
+        "🔄 নতুন চ্যাট শুরু হয়েছে। আগের কথোপকথনের প্রসঙ্গ এই সেশনে আর ব্যবহার হবে না।"
+      );
+
+    default:
+      return null;
+  }
+}
+
+// ==========================================
+// 14. TRANSLATION CALLBACKS
+// ==========================================
 
 bot.on("callback_query", async query => {
-  const chatId = query.message?.chat?.id;
-
-  if (!chatId) return;
-
-  const s = getSession(chatId);
-  const data = query.data || "";
-
-  await bot.answerCallbackQuery(query.id).catch(() => {});
-
   try {
-    if (data === "home") {
-      return showHome(chatId, query.from.first_name);
-    }
+    const userId = String(query.from.id);
+    const chatId = query.message.chat.id;
+    const data = query.data || "";
 
-    if (data.startsWith("speak:")) {
-      const item = audioTexts.get(data.slice(6));
+    await bot.answerCallbackQuery(query.id);
 
-      if (!item) {
-        throw new Error("এই অডিও অনুরোধের মেয়াদ শেষ। লেখাটি আবার তৈরি করুন।");
-      }
+    if (data.startsWith("langpage_")) {
+      const page = Number(data.split("_")[1]) || 0;
 
-      return await sendSpeech(chatId, item.text, item.lang);
-    }
-
-    if (data.startsWith("platform:")) {
-      s.platform = data.split(":")[1];
-      s.mode = "post_topic";
-
-      return bot.sendMessage(
-        chatId,
-        "✍️ কোন বিষয়ে পোস্ট লিখব?\nউদাহরণ: বাংলাদেশের প্রাকৃতিক সৌন্দর্য"
-      );
-    }
-
-    if (data.startsWith("langpage:")) {
-      const page = Math.max(0, Number(data.split(":")[1]) || 0);
-
-      return bot.editMessageReplyMarkup(languageKeyboard(page), {
-        chat_id: chatId,
-        message_id: query.message.message_id
-      });
-    }
-
-    if (data.startsWith("lang:")) {
-      s.language = data.split(":")[1];
-      s.mode = "translation";
-
-      return bot.sendMessage(
-        chatId,
-        "✍️ এখন যে কোনো ভাষার লেখা পাঠান। আমি ভাষা শনাক্ত করে নির্বাচিত ভাষায় অনুবাদ করব।"
-      );
-    }
-
-    if (data.startsWith("calc:")) {
-      const key = data.slice(5);
-
-      if (key === "🏠 মেনু") {
-        return showHome(chatId, query.from.first_name);
-      }
-
-      if (key === "C") {
-        s.expression = "";
-      } else if (key === "⌫") {
-        s.expression = s.expression.slice(0, -1);
-      } else if (key === "=") {
-        const result = calculate(s.expression);
-
-        return sendRichText(
-          chatId,
-          `🧮 হিসাব: ${result.expression}\n\n✅ উত্তর: ${result.answer}`,
-          { reply_markup: mainMenu },
-          "bn"
-        );
-      } else {
-        const symbols = {
-          "÷": "/",
-          "×": "*",
-          "−": "-",
-          "√": "sqrt(",
-          "x²": "^2",
-          "x³": "^3",
-          "sin": "sin(",
-          "cos": "cos(",
-          "tan": "tan(",
-          "log": "log(",
-          "π": "pi"
-        };
-
-        s.expression += Object.hasOwn(symbols, key)
-          ? symbols[key]
-          : key;
-      }
-
-      return bot.editMessageText(
-        "🧮 আপনার হিসাব:\n\n" + (s.expression || "খালি"),
+      return bot.editMessageReplyMarkup(
+        languageKeyboard(page),
         {
           chat_id: chatId,
-          message_id: query.message.message_id,
-          reply_markup: calcKeyboard()
+          message_id: query.message.message_id
         }
       );
     }
-  } catch (error) {
-    console.error("Callback error:", error);
 
-    return bot.sendMessage(
-      chatId,
-      "❌ " + error.message,
-      { reply_markup: mainMenu }
-    );
+    if (data.startsWith("lang_")) {
+      const code = data.replace("lang_", "");
+      const language = getLanguage(code);
+
+      if (!language) return;
+
+      const session = getSession(userId);
+      session.mode = "translate";
+      session.targetLanguage = code;
+
+      return sendText(
+        chatId,
+        `${language.flag} ${language.name} নির্বাচন করা হয়েছে।\n\nএখন যে লেখাটি অনুবাদ করতে চান সেটি পাঠান।`
+      );
+    }
+
+    if (data === "speak_last") {
+      const answer = lastAnswers.get(userId);
+
+      if (!answer) {
+        return sendText(chatId, "শোনার মতো কোনো উত্তর নেই।");
+      }
+
+      return speakText(chatId, answer);
+    }
+
+  } catch (error) {
+    console.error("Callback error:", error.message);
   }
 });
 
-// ==================================
-// START COMMAND
-// ==================================
+// ==========================================
+// 15. VOICE MESSAGE TO TEXT
+// ==========================================
 
-bot.onText(/^\/start(?:@\w+)?(?:\s.*)?$/, msg => {
-  showHome(msg.chat.id, msg.from.first_name);
-});
+async function transcribeVoice(chatId, userId, voice) {
+  await typing(chatId);
 
-// ==================================
-// MESSAGE HANDLER
-// ==================================
+  const fileUrl = await bot.getFileLink(voice.file_id);
+  const response = await fetch(fileUrl);
 
-bot.on("message", async msg => {
-  if (!msg.text || msg.text.startsWith("/")) return;
+  if (!response.ok) {
+    throw new Error("ভয়েস ফাইল ডাউনলোড করা যায়নি।");
+  }
 
-  const chatId = msg.chat.id;
-  const text = msg.text.trim();
-  const s = getSession(chatId);
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  if (buffer.length > 18 * 1024 * 1024) {
+    throw new Error("ভয়েস ফাইলটি অনেক বড়। ছোট ভয়েস পাঠান।");
+  }
+
+  const result = await ai.models.generateContent({
+    model: MODEL,
+    contents: [
+      {
+        inlineData: {
+          data: buffer.toString("base64"),
+          mimeType: "audio/ogg"
+        }
+      },
+      "এই অডিওতে যা বলা হয়েছে তা হুবহু লেখায় রূপান্তর করো। যে ভাষায় বলা হয়েছে সেই ভাষাতেই লিখবে। শুধু ট্রান্সক্রিপশন দাও।"
+    ]
+  });
+
+  const transcript = result.text?.trim();
+
+  if (!transcript) {
+    throw new Error("অডিও থেকে লেখা পাওয়া যায়নি।");
+  }
+
+  await sendText(
+    chatId,
+    `🎙️ আপনার কথার লেখা:\n\n${transcript}\n\nএখন চাইলে AI-কে প্রশ্ন করতে পারেন।`
+  );
+
+  const session = getSession(userId);
+  session.mode = "chat";
+  session.history.push({
+    role: "user",
+    parts: [{ text: transcript }]
+  });
+}
+
+// ==========================================
+// 16. IMAGE OCR
+// ==========================================
+
+async function readImage(chatId, userId, photo) {
+  await typing(chatId);
+
+  const fileUrl = await bot.getFileLink(photo.file_id);
+  const response = await fetch(fileUrl);
+
+  if (!response.ok) {
+    throw new Error("ছবি ডাউনলোড করা যায়নি।");
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  if (buffer.length > 18 * 1024 * 1024) {
+    throw new Error("ছবিটি অনেক বড়। ছোট ছবি পাঠান।");
+  }
+
+  const result = await ai.models.generateContent({
+    model: MODEL,
+    contents: [
+      {
+        inlineData: {
+          data: buffer.toString("base64"),
+          mimeType: "image/jpeg"
+        }
+      },
+      "ছবির মধ্যে থাকা লেখা শনাক্ত করে পরিষ্কারভাবে লিখে দাও। লেখা না থাকলে ছবির সংক্ষিপ্ত বিবরণ দাও।"
+    ]
+  });
+
+  const answer = result.text?.trim() || "ছবিটি পড়া যায়নি।";
+
+  lastAnswers.set(userId, answer);
+  await sendText(chatId, `🖼️ ছবির ফলাফল:\n\n${answer}`);
+}
+
+// ==========================================
+// 17. PDF ASSISTANT
+// ==========================================
+
+async function readPDF(chatId, userId, document) {
+  if (document.mime_type !== "application/pdf") {
+    return sendText(chatId, "শুধু PDF ফাইল পাঠান।");
+  }
+
+  if (document.file_size > 18 * 1024 * 1024) {
+    return sendText(chatId, "PDF ফাইলটি অনেক বড়। ১৮ MB-এর কম ফাইল পাঠান।");
+  }
+
+  await typing(chatId);
+
+  const fileUrl = await bot.getFileLink(document.file_id);
+  const response = await fetch(fileUrl);
+
+  if (!response.ok) {
+    throw new Error("PDF ডাউনলোড করা যায়নি।");
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  const result = await ai.models.generateContent({
+    model: MODEL,
+    contents: [
+      {
+        inlineData: {
+          data: buffer.toString("base64"),
+          mimeType: "application/pdf"
+        }
+      },
+      "এই PDF-এর বিষয়বস্তু বাংলায় সংক্ষেপে বুঝিয়ে দাও। গুরুত্বপূর্ণ তথ্য, শিরোনাম ও মূল পয়েন্টগুলো সাজিয়ে দাও।"
+    ]
+  });
+
+  const answer = result.text?.trim() || "PDF বিশ্লেষণ করা যায়নি।";
+
+  lastAnswers.set(userId, answer);
+  await sendText(chatId, `📄 PDF সারাংশ:\n\n${answer}`);
+}
+
+// ==========================================
+// 18. TEXT MESSAGE ROUTER
+// ==========================================
+
+async function processText(chatId, userId, text) {
+  const session = getSession(userId);
+  const mode = session.mode;
+
+  if (mode === "translate") {
+    if (!session.targetLanguage) {
+      return showLanguageMenu(chatId);
+    }
+
+    await typing(chatId);
+
+    const answer = await translateText(
+      userId,
+      text,
+      session.targetLanguage
+    );
+
+    const language = getLanguage(session.targetLanguage);
+
+    lastAnswers.set(userId, answer);
+
+    return sendText(
+      chatId,
+      `${language.flag} ${language.name} অনুবাদ:\n\n${answer}`,
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "🔊 শুনুন", callback_data: "speak_last" },
+            { text: "🌍 ভাষা বদলান", callback_data: "lang_bn" }
+          ]]
+        }
+      }
+    );
+  }
+
+  if (mode === "calculator") {
+    const result = calculate(text);
+
+    const explanation = await explainCalculation(
+      userId,
+      text,
+      result
+    );
+
+    return sendText(
+      chatId,
+      `🧮 হিসাব:\n${text}\n\n✅ ফলাফল: ${result}\n\n${explanation}`
+    );
+  }
+
+  if (mode === "number") {
+    const normalized = text.replace(/[০-৯]/g, d =>
+      String("০১২৩৪৫৬৭৮৯".indexOf(d))
+    );
+
+    const value = Number(normalized);
+
+    if (!Number.isInteger(value) || value < 0) {
+      return sendText(chatId, "দয়া করে একটি ধনাত্মক পূর্ণসংখ্যা দিন।");
+    }
+
+    return sendText(
+      chatId,
+      `🔢 সংখ্যা: ${numberToBangla(value)}\n\nবাংলা কথায়: ${numberToWords(value)}`
+    );
+  }
+
+  if (mode === "learn") {
+    await typing(chatId);
+
+    const answer = await askAI(
+      userId,
+      `আমি ${text} ভাষা শিখতে চাই। একজন শিক্ষক হিসেবে আমাকে ৫টি দরকারি শব্দ শেখাও। প্রতিটির মূল ভাষার শব্দ, বাংলা অর্থ, বাংলা উচ্চারণ এবং একটি সহজ বাক্য দাও। শেষে ছোট কুইজ দাও।`
+    );
+
+    return sendText(chatId, answer);
+  }
+
+  if (mode === "content") {
+    await typing(chatId);
+
+    const answer = await askAI(
+      userId,
+      `এই বিষয় নিয়ে একটি মানসম্মত সোশ্যাল মিডিয়া পোস্ট তৈরি করো: ${text}। আকর্ষণীয় শিরোনাম, পোস্ট, ক্যাপশন ও প্রাসঙ্গিক হ্যাশট্যাগ দাও।`
+    );
+
+    return sendText(chatId, answer);
+  }
+
+  if (mode === "video") {
+    await typing(chatId);
+
+    const answer = await askAI(
+      userId,
+      `এই বিষয় নিয়ে একটি ভিডিও তৈরির পরিকল্পনা করো: ${text}। ভিডিওর শিরোনাম, হুক, দৃশ্যভিত্তিক স্ক্রিপ্ট, ভয়েসওভার ও শেষের আহ্বান দাও।`
+    );
+
+    return sendText(chatId, answer);
+  }
+
+  if (mode === "caption") {
+    await typing(chatId);
+
+    const answer = await askAI(
+      userId,
+      `এই বিষয় বা ছবির জন্য ৩টি আলাদা সোশ্যাল মিডিয়া ক্যাপশন এবং প্রাসঙ্গিক হ্যাশট্যাগ তৈরি করো: ${text}`
+    );
+
+    return sendText(chatId, answer);
+  }
+
+  if (mode === "formulas") {
+    await typing(chatId);
+
+    const answer = await askAI(
+      userId,
+      `বাংলায় ${text} বিষয়ে প্রয়োজনীয় গণিতের সূত্র, প্রতীকগুলোর অর্থ এবং সহজ উদাহরণ দাও।`
+    );
+
+    return sendText(chatId, answer);
+  }
+
+  if (mode === "live") {
+    await typing(chatId);
+
+    if (!ENABLE_GOOGLE_SEARCH) {
+      return sendText(chatId, "লাইভ সার্চ বর্তমানে চালু নেই।");
+    }
+
+    const answer = await askAI(
+      userId,
+      `এই প্রশ্নের উত্তর দিতে Google Search ব্যবহার করে পাওয়া সাম্প্রতিক তথ্য ও তারিখ উল্লেখ করো। তথ্য না পেলে অনুমান করবে না। প্রশ্ন: ${text}`,
+      { liveSearch: true }
+    );
+
+    return sendText(chatId, answer);
+  }
+
+  // Default: AI Chat
+  await typing(chatId);
+
+  const answer = await askAI(userId, text);
+
+  return sendText(
+    chatId,
+    answer,
+    {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "🔊 উত্তর শুনুন", callback_data: "speak_last" },
+          { text: "💬 নতুন চ্যাট", callback_data: "new_chat" }
+        ]]
+      }
+    }
+  );
+}
+
+// ==========================================
+// 19. NEW CHAT CALLBACK
+// ==========================================
+
+bot.on("callback_query", async query => {
+  if (query.data !== "new_chat") return;
 
   try {
-    if (text === "🏠 মেইন মেনু") {
-      return showHome(chatId, msg.from.first_name);
-    }
+    const userId = String(query.from.id);
+    const session = getSession(userId);
 
-    if (text === "✍️ AI অটো পোস্ট") {
-      return startPost(chatId);
-    }
+    session.history = [];
+    session.mode = "chat";
 
-    if (text === "🎬 ভিডিও কনটেন্ট") {
-      s.mode = "video_topic";
+    await bot.answerCallbackQuery(query.id, {
+      text: "নতুন চ্যাট শুরু হয়েছে।"
+    });
 
-      return bot.sendMessage(
-        chatId,
-        "🎬 ভিডিওর বিষয় লিখে পাঠান।"
-      );
-    }
-
-    if (text === "🧮 ক্যালকুলেটর") {
-      return showCalculator(chatId);
-    }
-
-    if (text === "🌐 অনুবাদ") {
-      return showLanguages(chatId);
-    }
-
-    if (text === "📱 সোশ্যাল ক্যাপশন") {
-      s.mode = "social_topic";
-
-      return bot.sendMessage(
-        chatId,
-        "📱 ক্যাপশনের বিষয় লিখুন।"
-      );
-    }
-
-    if (text === "🔢 সংখ্যা রূপান্তর") {
-      s.mode = "numbers";
-
-      return bot.sendMessage(
-        chatId,
-        "বাংলা অথবা ইংরেজি সংখ্যা পাঠান।"
-      );
-    }
-
-    if (text === "📚 গণিতের সূত্র") {
-      return sendRichText(
-        chatId,
-        formulas,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    if (text === "ℹ️ About") {
-      return sendRichText(
-        chatId,
-        ABOUT_TEXT,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    // AI POST
-    if (s.mode === "post_topic") {
-      if (text.length > 1000) {
-        return bot.sendMessage(
-          chatId,
-          "বিষয়টি ১০০০ অক্ষরের মধ্যে লিখুন।"
-        );
-      }
-
-      await bot.sendMessage(chatId, "⏳ AI পোস্ট তৈরি করছে...");
-
-      const result = await generatePost(
-        text,
-        s.platform || "facebook"
-      );
-
-      s.mode = "menu";
-      s.platform = null;
-
-      return sendRichText(
-        chatId,
-        result,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    // VIDEO
-    if (s.mode === "video_topic") {
-      await bot.sendMessage(
-        chatId,
-        "⏳ ভিডিও কনটেন্ট তৈরি হচ্ছে..."
-      );
-
-      const result = await generateVideo(text);
-      s.mode = "menu";
-
-      return sendRichText(
-        chatId,
-        result,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    // SOCIAL CAPTION
-    if (s.mode === "social_topic") {
-      await bot.sendMessage(
-        chatId,
-        "⏳ ক্যাপশন তৈরি হচ্ছে..."
-      );
-
-      const result = await generatePost(text, "instagram");
-      s.mode = "menu";
-
-      return sendRichText(
-        chatId,
-        result,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    // TRANSLATION
-    if (s.mode === "translation" && s.language) {
-      if (text.length > 1500) {
-        return bot.sendMessage(
-          chatId,
-          "অনুগ্রহ করে ১৫০০ অক্ষরের মধ্যে লেখা পাঠান।"
-        );
-      }
-
-      await bot.sendMessage(
-        chatId,
-        "🌐 ভাষা শনাক্ত করে অনুবাদ করা হচ্ছে..."
-      );
-
-      const result = await translateText(text, s.language);
-      const target = s.language;
-
-      s.mode = "menu";
-      s.language = null;
-
-      return sendRichText(
-        chatId,
-        `🌐 অনুবাদের ফলাফল\n\nমূল লেখা:\n${text}\n\nঅনুবাদ:\n${result}`,
-        { reply_markup: mainMenu },
-        target
-      );
-    }
-
-    // NUMBER CONVERTER
-    if (s.mode === "numbers") {
-      s.mode = "menu";
-
-      return sendRichText(
-        chatId,
-        `🔢 বাংলা সংখ্যা: ${convertDigits(text, true)}\n` +
-        `🔢 ইংরেজি সংখ্যা: ${convertDigits(text, false)}`,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    // CALCULATOR
-    if (s.mode === "calculator") {
-      const result = calculate(text);
-
-      return sendRichText(
-        chatId,
-        `🧮 হিসাব: ${result.expression}\n\n✅ উত্তর: ${result.answer}`,
-        { reply_markup: mainMenu },
-        "bn"
-      );
-    }
-
-    return bot.sendMessage(
-      chatId,
-      "নিচের মেনু থেকে একটি ফিচার নির্বাচন করুন।",
-      { reply_markup: mainMenu }
+    await sendText(
+      query.message.chat.id,
+      "💬 নতুন AI চ্যাট শুরু হয়েছে। আপনার প্রশ্ন লিখুন।"
     );
+  } catch (error) {
+    console.error("New chat error:", error.message);
+  }
+});
+
+// ==========================================
+// 20. MAIN TELEGRAM MESSAGE HANDLER
+// ==========================================
+
+bot.on("message", async message => {
+  const chatId = message.chat.id;
+  const userId = String(message.from?.id || "");
+
+  if (!userId) return;
+
+  try {
+    // Ignore unsupported chat types.
+    if (message.chat.type !== "private") return;
+
+    // Voice input
+    if (message.voice) {
+      if (!checkRateLimit(userId)) {
+        return sendText(chatId, "একটু অপেক্ষা করে আবার চেষ্টা করুন।");
+      }
+
+      return await transcribeVoice(
+        chatId,
+        userId,
+        message.voice
+      );
+    }
+
+    // Photo OCR
+    if (message.photo?.length) {
+      const session = getSession(userId);
+
+      if (session.mode !== "image") {
+        return sendText(
+          chatId,
+          "ছবি থেকে লেখা পড়তে প্রথমে 🖼️ ছবি থেকে লেখা নির্বাচন করুন।"
+        );
+      }
+
+      if (!checkRateLimit(userId)) {
+        return sendText(chatId, "একটু অপেক্ষা করে আবার চেষ্টা করুন।");
+      }
+
+      const photo = message.photo[message.photo.length - 1];
+
+      return await readImage(chatId, userId, photo);
+    }
+
+    // PDF
+    if (message.document) {
+      const session = getSession(userId);
+
+      if (session.mode !== "pdf") {
+        return sendText(
+          chatId,
+          "PDF Assistant নির্বাচন করে তারপর PDF পাঠান।"
+        );
+      }
+
+      if (!checkRateLimit(userId)) {
+        return sendText(chatId, "একটু অপেক্ষা করে আবার চেষ্টা করুন।");
+      }
+
+      return await readPDF(
+        chatId,
+        userId,
+        message.document
+      );
+    }
+
+    if (!message.text) return;
+
+    const text = message.text.trim();
+
+    if (!text) return;
+
+    // Commands
+    if (text === "/start") {
+      const session = getSession(userId);
+      session.mode = "chat";
+      session.history = [];
+
+      return showHome(chatId);
+    }
+
+    if (text === "/menu") {
+      return showHome(chatId);
+    }
+
+    if (text === "/help") {
+      return showHelp(chatId);
+    }
+
+    if (text === "/reset") {
+      const session = getSession(userId);
+      session.history = [];
+      session.mode = "chat";
+      lastAnswers.delete(userId);
+
+      return sendText(chatId, "নতুন চ্যাট শুরু হয়েছে।");
+    }
+
+    // Main menu
+    const menuResult = await handleMenu(
+      chatId,
+      userId,
+      text
+    );
+
+    if (menuResult !== null) return;
+
+    // Rate limit
+    if (!checkRateLimit(userId)) {
+      return sendText(
+        chatId,
+        "⚡ আপনি দ্রুত অনেকগুলো অনুরোধ পাঠিয়েছেন। এক মিনিট পরে আবার চেষ্টা করুন।"
+      );
+    }
+
+    // Text processing
+    await processText(chatId, userId, text);
 
   } catch (error) {
     console.error("Message error:", error);
 
-    return bot.sendMessage(
-      chatId,
-      "❌ সমস্যা হয়েছে:\n" + error.message,
-      { reply_markup: mainMenu }
-    );
+    let messageText =
+      "দুঃখিত, অনুরোধটি সম্পন্ন করা যায়নি। একটু পরে আবার চেষ্টা করুন।";
+
+    if (
+      error.message?.includes("429") ||
+      error.message?.toLowerCase().includes("quota")
+    ) {
+      messageText =
+        "⚠️ AI সার্ভারের ব্যবহারসীমা সাময়িকভাবে পূর্ণ হয়েছে। কিছুক্ষণ পরে চেষ্টা করুন।";
+    } else if (
+      error.message?.includes("API key") ||
+      error.message?.includes("401") ||
+      error.message?.includes("403")
+    ) {
+      messageText =
+        "⚠️ AI API সেটিংসে সমস্যা আছে। সার্ভার অ্যাডমিনকে জানাতে হবে।";
+    } else if (error.message?.length < 250) {
+      messageText = `⚠️ ${error.message}`;
+    }
+
+    try {
+      await sendText(chatId, messageText);
+    } catch (sendError) {
+      console.error("Error reply failed:", sendError.message);
+    }
   }
 });
 
-// ==================================
-// ERROR HANDLING
-// ==================================
+// ==========================================
+// 21. BOT ERROR HANDLING
+// ==========================================
 
 bot.on("polling_error", error => {
   console.error("Telegram polling error:", error.message);
 });
 
-console.log("🌟 Bangla Smart Tools started!");
+bot.on("webhook_error", error => {
+  console.error("Telegram webhook error:", error.message);
+});
+
+process.on("unhandledRejection", error => {
+  console.error("Unhandled rejection:", error);
+});
+
+process.on("uncaughtException", error => {
+  console.error("Uncaught exception:", error);
+});
+
+console.log("=================================");
+console.log("Bangla Smart Tools v7.0.0");
+console.log("AI Model:", MODEL);
+console.log("Google Search:", ENABLE_GOOGLE_SEARCH);
+console.log("Telegram Bot: Starting...");
+console.log("=================================");
