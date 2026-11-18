@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
 const app = express();
@@ -13,7 +13,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // জেমিনি এআই ইনিশিয়ালাইজ (API Key রেন্ডারের Environment Variable থেকে আসবে)
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ১. হেলথ চেক রাউট (Uptime Robot-এর জন্য)
 app.get('/ping', (req, res) => {
@@ -42,12 +42,11 @@ app.post('/api/ai', async (req, res) => {
         const fullPrompt = `${systemInstruction}\n\nইউজারের ইনপুট: ${prompt}`;
 
         // সঠিক ও ফাস্ট জেমিনি মডেল ব্যবহার
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: fullPrompt,
-        });
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(fullPrompt);
+        const response = await result.response;
 
-        res.json({ reply: response.text });
+        res.json({ reply: response.text() });
     } catch (error) {
         console.error("AI Error:", error);
         res.status(500).json({ error: "দুঃখিত, সার্ভারে সাময়িক সমস্যা হয়েছে। আবার চেষ্টা করুন।" });
