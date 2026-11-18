@@ -1,7 +1,7 @@
 {
   "name": "bangla-smart-tools",
-  "version": "6.0.0",
-  "description": "Professional Bangla Smart Tools AI Telegram Bot",
+  "version": "7.0.0",
+  "description": "Professional Bangla AI Telegram Assistant",
   "type": "module",
   "main": "index.js",
   "scripts": {
